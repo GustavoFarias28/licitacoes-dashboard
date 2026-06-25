@@ -3,12 +3,19 @@
    Snapshot estático (artifact iframe sem bridge MCP)
    ===================================================================== */
 
-// ----------------- CONSTANTES -----------------
-const COMERCIAIS = ['N.D.A','Fábio','Paulo','Carlos','Garrido','Álvaro'];
-const CATEGORIAS = ['T.I.','CFTV','Controle de Acesso','Áudio&Vídeo','Data Center','Videowall','Tela Interativa','Drone','Cabeamento Estruturado'];
+// ----------------- SNAPSHOT (injetado pelo servidor a partir do Supabase) -----------------
+const SNAPSHOT = JSON.parse(document.getElementById('__SNAPSHOT__').textContent);
+
+// ----------------- CONSTANTES / DOMÍNIOS -----------------
+// Domínios de validação (dropdowns) vêm do servidor via SNAPSHOT.domain (fonte única
+// em lib/domain.ts). Fallback p/ valores embutidos caso o snapshot venha sem 'domain'
+// (ex.: cache antigo logo após o deploy).
+const DOMAIN = (SNAPSHOT && SNAPSHOT.domain) || {};
+const COMERCIAIS = DOMAIN.comerciais || ['N.D.A','Fábio','Carlos','Garrido'];
+const CATEGORIAS = DOMAIN.categorias || ['T.I.','CFTV','Controle de Acesso','Áudio&Vídeo','Data Center','Videowall','Tela Interativa','Drone','Cabeamento Estruturado'];
 
 // Ordem desejada das colunas do Kanban
-const STATUS_ORDER = [
+const STATUS_ORDER = DOMAIN.status || [
   'Em Análise',
   'Validação',
   'Não Participamos',
@@ -18,7 +25,7 @@ const STATUS_ORDER = [
   'Ganhamos',
   'Aguardando Republicação',
 ];
-const STATUS_COLORS = {
+const STATUS_COLORS = DOMAIN.statusColors || {
   'Em Análise': '#5278B5',
   'Validação': '#E88126',
   'Vamos Participar': '#0E2447',
@@ -28,6 +35,11 @@ const STATUS_COLORS = {
   'Aguardando Republicação': '#71757B',
   'Participamos': '#5278B5',
 };
+const MOTIVOS_DECLINIO = DOMAIN.motivosDeclinio || [
+  'Atestados','Não declarado','Falta de Parceiros','Sem diferencial tecnológico',
+  'Direcionamento de Fabricante','Falta de R.O.','V. Ref. Baixo',
+  'Distanciamento do escopo','Certificados','Localização',
+];
 
 // Paleta para gráficos (paleta da Avantia)
 const PALETTE = ['#0E2447', '#5278B5', '#E88126', '#71757B', '#C4C7CD', '#9DA6B5', '#D6D8DD', '#1A3866', '#F0A258', '#B0B4BC'];
@@ -39,11 +51,6 @@ if (window.Chart && Chart.defaults) {
   Chart.defaults.color = '#71757B';
   Chart.defaults.borderColor = '#E1E3E8';
 }
-
-// ----------------- SNAPSHOT EMBUTIDO -----------------
-
-// ----------------- SNAPSHOT (injetado pelo servidor a partir do Supabase) -----------------
-const SNAPSHOT = JSON.parse(document.getElementById('__SNAPSHOT__').textContent);
 
 // ----------------- STATE -----------------
 const state = {
@@ -76,17 +83,22 @@ function fmtBRLshort(v){
 }
 function fmtCount(n){ return (n||0).toLocaleString('pt-BR'); }
 function fmtDate(d){ return d ? d.toLocaleDateString('pt-BR') : '—'; }
+// Acrescenta a hora de abertura (' · HH:MM') quando o registro a tiver.
+// horaStr vem vazio para registros antigos (00:00), então some sem ruído.
+function comHora(rec, dataFmt){ return rec && rec.horaStr ? dataFmt + ' · ' + rec.horaStr : dataFmt; }
 function escapeHtml(s){
   return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 function escapeAttr(s){ return escapeHtml(s); }
 
 // ----------------- LOAD SNAPSHOT -----------------
+// Converte um record cru (do snapshot OU de uma resposta da API) para o formato em
+// memória: a data string 'YYYY-MM-DD' vira Date local (o resto do código usa r.data.getTime()).
+function normalizeRecord(r){
+  return { ...r, data: r && r.data ? new Date(String(r.data).slice(0,10) + 'T00:00:00') : null };
+}
 function loadFromSnapshot(){
-  state.records = (SNAPSHOT.records || []).map(r => ({
-    ...r,
-    data: r.data ? new Date(r.data + 'T00:00:00') : null,
-  }));
+  state.records = (SNAPSHOT.records || []).map(normalizeRecord);
   state.loadedAt = SNAPSHOT.fetchedAt ? new Date(SNAPSHOT.fetchedAt) : new Date();
   const validDates = state.records.map(r => r.data).filter(d => d);
   if (validDates.length){
@@ -353,6 +365,38 @@ function chartOptsPie(){
   };
 }
 
+// Filtro cruzado: alterna um valor no filtro `key` e re-renderiza (gráficos + tabelas).
+// IMPORTANTE: o render() destrói/recria os gráficos. Quando chamado de dentro do onClick
+// de um Chart.js, destruir o gráfico no meio do dispatch do evento quebra o Chart.js
+// (TypeError ...reading 'handleEvent'). Por isso adiamos o render p/ depois do evento.
+function toggleFilter(key, value){
+  if (!value || value === '(em branco)' || value === '(nenhum)') return;
+  const cur = getFilterValues(key).slice();
+  const i = cur.indexOf(value);
+  if (i >= 0) cur.splice(i, 1); else cur.push(value);
+  setFilterValues(key, cur);
+  setTimeout(render, 0);
+}
+// Realce do filtro ativo: esmaece os rótulos não selecionados de um gráfico.
+function fadeColor(hex){ return (typeof hex === 'string' && /^#[0-9a-fA-F]{6}$/.test(hex)) ? hex + '38' : hex; }
+function maybeDim(labels, baseColors, key){
+  const act = getFilterValues(key);
+  if (!act.length) return baseColors;
+  return labels.map((l, i) => act.includes(String(l)) ? baseColors[i] : fadeColor(baseColors[i]));
+}
+// Options extras p/ tornar um gráfico clicável (segmenta os demais pelo rótulo clicado).
+function chartClickOpts(key){
+  return {
+    onClick: (evt, els, chart) => {
+      if (els && els.length) toggleFilter(key, String(chart.data.labels[els[0].index]));
+    },
+    onHover: (evt, els) => {
+      const t = evt && evt.native && evt.native.target;
+      if (t) t.style.cursor = (els && els.length) ? 'pointer' : 'default';
+    },
+  };
+}
+
 function renderCharts(recs){
   const meses = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
 
@@ -396,12 +440,12 @@ function renderCharts(recs){
       labels: Object.keys(statusCounts),
       datasets: [{
         data: Object.values(statusCounts),
-        backgroundColor: Object.keys(statusCounts).map(s => STATUS_COLORS[s] || '#C4C7CD'),
+        backgroundColor: maybeDim(Object.keys(statusCounts), Object.keys(statusCounts).map(s => STATUS_COLORS[s] || '#C4C7CD'), 'status'),
         borderWidth: 2,
         borderColor: '#fff',
       }],
     },
-    options: chartOptsPie(),
+    options: { ...chartOptsPie(), ...chartClickOpts('status') },
   });
 
   // Categoria (bar horizontal) — categorias múltiplas (separadas por ';' ou '/')
@@ -421,9 +465,9 @@ function renderCharts(recs){
     type: 'bar',
     data: {
       labels: catEntries.map(([k])=>k),
-      datasets: [{ data: catEntries.map(([,v])=>v), backgroundColor: '#5278B5', borderRadius: 4 }],
+      datasets: [{ data: catEntries.map(([,v])=>v), backgroundColor: maybeDim(catEntries.map(([k])=>k), catEntries.map(()=>'#5278B5'), 'categoria'), borderRadius: 4 }],
     },
-    options: chartOptsBarH(),
+    options: { ...chartOptsBarH(), ...chartClickOpts('categoria') },
   });
 
   // UF top 10
@@ -434,9 +478,9 @@ function renderCharts(recs){
     type: 'bar',
     data: {
       labels: ufEntries.map(([k])=>k),
-      datasets: [{ data: ufEntries.map(([,v])=>v), backgroundColor: '#0E2447', borderRadius: 4 }],
+      datasets: [{ data: ufEntries.map(([,v])=>v), backgroundColor: maybeDim(ufEntries.map(([k])=>k), ufEntries.map(()=>'#0E2447'), 'uf'), borderRadius: 4 }],
     },
-    options: chartOptsBar('Quantidade'),
+    options: { ...chartOptsBar('Quantidade'), ...chartClickOpts('uf') },
   });
 
   // Motivos de declínio
@@ -749,7 +793,7 @@ function renderConcorrenciaTable(recs){
       ? ((ve - vf) / ve * 100).toFixed(1) + '%' : '—';
     return {
       data: r.data ? r.data.getTime() : 0,
-      dataStr: r.dataStr || '—', nome: r.nome || '—', uf: r.uf || '—',
+      dataStr: r.dataStr || '—', horaStr: r.horaStr || '', nome: r.nome || '—', uf: r.uf || '—',
       categoria: r.categoria || '—', comps: comps.join('; ') || '—',
       sols: sols.length ? [...new Set(sols)].join(', ') : '—',
       ve, vf, red, opLink: r.opLink,
@@ -758,7 +802,7 @@ function renderConcorrenciaTable(recs){
 
   tbody.innerHTML = rows.length ? rows.map(r => `
     <tr>
-      <td>${escapeHtml(r.dataStr)}</td>
+      <td style="white-space:nowrap;">${escapeHtml(comHora(r, r.dataStr))}</td>
       <td>${r.opLink ? `<a href="${escapeAttr(r.opLink)}" target="_blank" rel="noopener">${escapeHtml(r.nome)}</a>` : escapeHtml(r.nome)}</td>
       <td>${escapeHtml(r.uf)}</td>
       <td>${escapeHtml(r.categoria)}</td>
@@ -933,6 +977,12 @@ function renderValorCategoriaTreemap(recs){
     title.textContent = `${rc.label}: ${fmtBRL(rc.value)}`;
     g.appendChild(title);
 
+    // Filtro cruzado: clicar num bloco segmenta tudo por aquela categoria.
+    if (rc.value > 0){
+      g.style.cursor = 'pointer';
+      g.addEventListener('click', () => toggleFilter('categoria', String(rc.label)));
+    }
+
     svg.appendChild(g);
   });
 }
@@ -947,7 +997,7 @@ function renderVamosTable(recs){
   }
   tbody.innerHTML = vamos.map((r,i)=>`
     <tr style="cursor:pointer;" data-idx="${i}" data-vamos="1">
-      <td>${fmtDate(r.data)}</td>
+      <td style="white-space:nowrap;">${comHora(r, fmtDate(r.data))}</td>
       <td>${r.opLink ? `<a class="op-row-link" href="${escapeAttr(r.opLink)}" target="_blank" rel="noopener" title="OP ${escapeAttr(String(r.op||''))} — abrir pasta no SharePoint" onclick="event.stopPropagation();">OP ${escapeHtml(String(r.op||''))}</a>` : ''}${escapeHtml(r.nome)}</td>
       <td>${escapeHtml(r.uf)}</td>
       <td>${escapeHtml(r.categoria)}</td>
@@ -1009,7 +1059,7 @@ function renderAllTable(recs){
     const sc = STATUS_COLORS[r.status] || '#C4C7CD';
     return `
       <tr style="cursor:pointer;" data-idx="${i}" data-table="all">
-        <td style="white-space:nowrap;">${fmtDate(r.data)}</td>
+        <td style="white-space:nowrap;">${comHora(r, fmtDate(r.data))}</td>
         <td>${r.opLink ? `<a class="op-row-link" href="${escapeAttr(r.opLink)}" target="_blank" rel="noopener" title="OP ${escapeAttr(String(r.op||''))} — abrir pasta no SharePoint" onclick="event.stopPropagation();">OP ${escapeHtml(String(r.op||''))}</a>` : ''}${escapeHtml(r.nome || '')}</td>
         <td>${escapeHtml(r.uf || '')}</td>
         <td>${escapeHtml(r.categoria || '')}</td>
@@ -1075,7 +1125,7 @@ function renderKanban(){
         <div class="kanban-card-meta">
           ${r.uf ? `<span class="pill pill-uf">${escapeHtml(r.uf)}</span>` : ''}
           ${r.categoria ? `<span class="pill pill-cat">${escapeHtml(r.categoria)}</span>` : ''}
-          ${r.data ? `<span class="pill pill-date">${fmtDate(r.data)}</span>` : ''}
+          ${r.data ? `<span class="pill pill-date">${comHora(r, fmtDate(r.data))}</span>` : ''}
           ${r.comercial ? `<span class="pill">${escapeHtml(r.comercial)}</span>` : ''}
           ${(r.status === 'Ganhamos' && r.valorFinal != null)
             ? `<span class="pill pill-value">${fmtBRL(r.valorFinal)}</span>`
@@ -1157,44 +1207,205 @@ document.getElementById('cal-prev').onclick = () => { state.calDate = new Date(s
 document.getElementById('cal-next').onclick = () => { state.calDate = new Date(state.calDate.getFullYear(), state.calDate.getMonth()+1, 1); renderCalendar(); };
 document.getElementById('cal-today').onclick = () => { state.calDate = new Date(); renderCalendar(); };
 
-// ----------------- MODAL -----------------
+// ----------------- API (escrita via Route Handlers — service_role fica no servidor) -----------------
+async function apiSend(method, url, body){
+  const res = await fetch(url, {
+    method,
+    headers: body ? { 'Content-Type': 'application/json' } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  let data = {};
+  try { data = await res.json(); } catch(e){}
+  if (!res.ok) throw new Error(data.error || 'Falha na operação');
+  return data;
+}
+async function apiPatch(id, patch){
+  const d = await apiSend('PATCH', '/api/licitacoes/' + encodeURIComponent(id), patch);
+  return normalizeRecord(d.record);
+}
+async function apiPost(rec){
+  const d = await apiSend('POST', '/api/licitacoes', rec);
+  return normalizeRecord(d.record);
+}
+async function apiDelete(id){
+  return apiSend('DELETE', '/api/licitacoes/' + encodeURIComponent(id));
+}
+// Invalida o cache ISR da página (fire-and-forget) p/ refletir a escrita em reloads/outros usuários.
+function triggerRevalidate(){ try { fetch('/api/revalidate', { method: 'POST' }); } catch(e){} }
+
+// Aplica o resultado de uma escrita ao estado local e re-renderiza tudo.
+function upsertRecord(rec){
+  const i = state.records.findIndex(r => String(r.id) === String(rec.id));
+  if (i >= 0) state.records[i] = rec; else state.records.push(rec);
+  render();
+  triggerRevalidate();
+}
+function removeRecord(id){
+  state.records = state.records.filter(r => String(r.id) !== String(id));
+  render();
+  triggerRevalidate();
+}
+
+// 'YYYY-MM-DD' a partir do Date local (o record em memória guarda data como Date).
+function toYMD(d){
+  if (!d) return '';
+  const y = d.getFullYear();
+  const m = String(d.getMonth()+1).padStart(2,'0');
+  const day = String(d.getDate()).padStart(2,'0');
+  return `${y}-${m}-${day}`;
+}
+
+// ----------------- MODAL (visualizar / editar / criar) -----------------
+let modalRec = null; // record em edição; {id:''} (ou sem id) => criação
+
+function mdSelect(field, options, current, allowEmpty){
+  let html = '<select class="md-input" data-field="'+field+'">';
+  if (allowEmpty) html += '<option value=""'+(!current?' selected':'')+'>—</option>';
+  // valor legado fora do domínio: mantém selecionável (leitura tolerante)
+  if (current && options.indexOf(current) === -1){
+    html += '<option value="'+escapeAttr(current)+'" selected>'+escapeHtml(current)+' (atual)</option>';
+  }
+  html += options.map(o => '<option value="'+escapeAttr(o)+'"'+(o===current?' selected':'')+'>'+escapeHtml(o)+'</option>').join('');
+  return html + '</select>';
+}
+function mdCategorias(current){
+  const sel = extractCategorias({categoria: current || ''});
+  const opts = CATEGORIAS.slice();
+  sel.forEach(c => { if (opts.indexOf(c) === -1) opts.push(c); }); // tolera legados
+  return '<div class="md-cats">' + opts.map(o =>
+    '<label class="md-cat"><input type="checkbox" data-cat value="'+escapeAttr(o)+'"'+(sel.indexOf(o)>=0?' checked':'')+'><span>'+escapeHtml(o)+'</span></label>'
+  ).join('') + '</div>';
+}
+function mdRow(label, controlHtml){
+  return '<div class="md-row"><label class="md-label">'+label+'</label><div class="md-control">'+controlHtml+'</div></div>';
+}
+
 function openModal(rec){
   if (!rec) return;
-  document.getElementById('modal-title').textContent = rec.nome || '(sem nome)';
+  modalRec = rec;
+  const isNew = !rec.id;
+  document.getElementById('modal-title').textContent = isNew ? 'Nova licitação' : (rec.nome || '(sem nome)');
   const body = document.getElementById('modal-body');
-  const opStr = String(rec.op || '');
-  // Prefer the explicit opLink (extracted from the Excel hyperlink target), then
-  // fall back to URL embedded inside the OP text (legacy snapshot format).
-  let opUrl = rec.opLink || null;
-  if (!opUrl) {
-    const tail = opStr.replace(/^\d+\s*-\s*/, '');
-    // Only treat as URL if it has a proper host (not "https://5708" placeholders)
-    if (/^https?:\/\/[a-zA-Z][^\/\s]*\.[a-zA-Z]/.test(tail)) opUrl = tail;
-  }
-  const opLabel = opStr.replace(/\s*-\s*https?:\/\/\S+$/, '') || opStr;
-  const linkOp = opUrl
-    ? `<a href="${escapeAttr(opUrl)}" target="_blank" rel="noopener">${escapeHtml(opLabel || rec.op || '—')}</a>`
-    : escapeHtml(opLabel || rec.op || '—');
-  body.innerHTML = `
-    <div class="modal-row"><div class="modal-label">Status</div><div class="modal-val"><span class="status-badge" style="background:${STATUS_COLORS[rec.status]||'#C4C7CD'}; color:#fff;">${escapeHtml(rec.status||'—')}</span></div></div>
-    <div class="modal-row"><div class="modal-label">Data abertura</div><div class="modal-val">${fmtDate(rec.data)}</div></div>
-    <div class="modal-row"><div class="modal-label">UF</div><div class="modal-val">${escapeHtml(rec.uf||'—')}</div></div>
-    <div class="modal-row"><div class="modal-label">Categoria</div><div class="modal-val">${escapeHtml(rec.categoria||'—')}</div></div>
-    <div class="modal-row"><div class="modal-label">Objeto</div><div class="modal-val">${escapeHtml(rec.objeto||'—')}</div></div>
-    <div class="modal-row"><div class="modal-label">Comercial</div><div class="modal-val">${escapeHtml(rec.comercial||'—')}</div></div>
-    <div class="modal-row"><div class="modal-label">Código</div><div class="modal-val">${escapeHtml(rec.codigo||'—')}</div></div>
-    <div class="modal-row"><div class="modal-label">OP</div><div class="modal-val">${linkOp}</div></div>
-    <div class="modal-row"><div class="modal-label">Valor estimado</div><div class="modal-val">${rec.valorEstimado != null ? fmtBRL(rec.valorEstimado) : '—'}</div></div>
-    <div class="modal-row"><div class="modal-label">Valor final</div><div class="modal-val">${rec.valorFinal != null ? fmtBRL(rec.valorFinal) : '—'}</div></div>
-    <div class="modal-row"><div class="modal-label">Motivo de declínio</div><div class="modal-val">${escapeHtml(rec.motivoDeclinio||'—')}</div></div>
-    <div class="modal-row"><div class="modal-label">Concorrentes</div><div class="modal-val">${escapeHtml(rec.concorrentes||'—')}</div></div>
-    <div class="modal-row"><div class="modal-label">Observações</div><div class="modal-val">${escapeHtml(rec.observacoes||'—')}</div></div>
-  `;
+  const v = (x) => escapeAttr(x ?? '');
+  body.innerHTML =
+    mdRow('Nome', '<input class="md-input" data-field="nome" value="'+v(rec.nome)+'">') +
+    mdRow('Status', mdSelect('status', STATUS_ORDER, rec.status||'', true)) +
+    mdRow('Data abertura',
+      '<input class="md-input md-date" type="date" data-field="data" value="'+v(toYMD(rec.data))+'">' +
+      '<input class="md-input md-time" type="time" data-field="horaStr" value="'+v(rec.horaStr)+'">') +
+    mdRow('UF', '<input class="md-input md-uf" data-field="uf" maxlength="2" value="'+v(rec.uf)+'">') +
+    mdRow('Categoria', mdCategorias(rec.categoria)) +
+    mdRow('Objeto', '<textarea class="md-input" data-field="objeto" rows="2">'+escapeHtml(rec.objeto||'')+'</textarea>') +
+    mdRow('Comercial', mdSelect('comercial', COMERCIAIS, rec.comercial||'', true)) +
+    mdRow('Código', '<input class="md-input" data-field="codigo" value="'+v(rec.codigo)+'">') +
+    mdRow('OP (número/rótulo)', '<input class="md-input" data-field="op" value="'+v(rec.op)+'">') +
+    mdRow('OP — link', '<input class="md-input" type="url" data-field="opLink" placeholder="https://…" value="'+v(rec.opLink)+'">') +
+    mdRow('Valor estimado', '<input class="md-input" type="number" step="0.01" min="0" data-field="valorEstimado" value="'+(rec.valorEstimado!=null?rec.valorEstimado:'')+'">') +
+    mdRow('Valor final', '<input class="md-input" type="number" step="0.01" min="0" data-field="valorFinal" value="'+(rec.valorFinal!=null?rec.valorFinal:'')+'">') +
+    mdRow('Motivo de declínio', mdSelect('motivoDeclinio', MOTIVOS_DECLINIO, rec.motivoDeclinio||'', true)) +
+    mdRow('Concorrentes', '<textarea class="md-input" data-field="concorrentes" rows="2">'+escapeHtml(rec.concorrentes||'')+'</textarea>') +
+    mdRow('Fabricantes', '<textarea class="md-input" data-field="fabricantes" rows="2">'+escapeHtml(rec.fabricantes||'')+'</textarea>') +
+    mdRow('Observações', '<textarea class="md-input" data-field="observacoes" rows="3">'+escapeHtml(rec.observacoes||'')+'</textarea>') +
+    '<div class="md-actions">' +
+      '<span class="md-msg"></span>' +
+      (isNew ? '' : '<button class="btn-danger" data-act="delete">Excluir</button>') +
+      '<button class="btn-ghost" data-act="cancel">Cancelar</button>' +
+      '<button class="btn-primary" data-act="save">'+(isNew?'Criar':'Salvar')+'</button>' +
+    '</div>';
+  body.querySelector('[data-act="save"]').onclick = saveModal;
+  body.querySelector('[data-act="cancel"]').onclick = closeModal;
+  const delBtn = body.querySelector('[data-act="delete"]');
+  if (delBtn) delBtn.onclick = deleteModal;
   document.getElementById('modal').classList.add('open');
+}
+
+function readModalForm(){
+  const body = document.getElementById('modal-body');
+  const out = {};
+  body.querySelectorAll('[data-field]').forEach(el => {
+    const f = el.getAttribute('data-field');
+    if (el.type === 'number') out[f] = el.value === '' ? null : Number(el.value);
+    else out[f] = el.value;
+  });
+  out.categoria = [...body.querySelectorAll('input[data-cat]:checked')].map(i => i.value).join('; ');
+  return out;
+}
+// Patch só com campos alterados (reduz colisão de concorrência).
+function computeModalPatch(rec){
+  const form = readModalForm();
+  const patch = {};
+  ['nome','status','uf','objeto','comercial','codigo','op','opLink','concorrentes','fabricantes','observacoes','motivoDeclinio'].forEach(f => {
+    if (String(form[f] ?? '') !== String(rec[f] ?? '')) patch[f] = form[f] ?? '';
+  });
+  ['valorEstimado','valorFinal'].forEach(f => {
+    const nv = form[f] == null ? null : Number(form[f]);
+    const ov = rec[f] == null ? null : Number(rec[f]);
+    if (nv !== ov) patch[f] = nv;
+  });
+  if ((form.categoria || '') !== (rec.categoria || '')) patch.categoria = form.categoria || '';
+  const newData = form.data || '', newHora = form.horaStr || '';
+  if (newData !== toYMD(rec.data) || newHora !== (rec.horaStr || '')){
+    patch.data = newData; patch.horaStr = newHora;
+  }
+  return patch;
+}
+function setModalBusy(busy, msg){
+  const body = document.getElementById('modal-body');
+  const msgEl = body.querySelector('.md-msg');
+  if (msgEl){ msgEl.textContent = msg || ''; msgEl.className = 'md-msg' + (busy ? '' : (msg ? ' err' : '')); }
+  body.querySelectorAll('button').forEach(b => b.disabled = busy);
+}
+async function saveModal(){
+  const rec = modalRec;
+  if (!rec) return;
+  try {
+    if (!rec.id){
+      const payload = readModalForm();
+      setModalBusy(true, 'Criando…');
+      const created = await apiPost(payload);
+      upsertRecord(created);
+      closeModal();
+      showBanner('Licitação criada.', 'info');
+    } else {
+      const patch = computeModalPatch(rec);
+      if (Object.keys(patch).length === 0){ closeModal(); return; }
+      setModalBusy(true, 'Salvando…');
+      const updated = await apiPatch(rec.id, patch);
+      upsertRecord(updated);
+      closeModal();
+      showBanner('Licitação atualizada.', 'info');
+    }
+  } catch(e){
+    setModalBusy(false, e.message || 'Erro ao salvar');
+  }
+}
+async function deleteModal(){
+  const rec = modalRec;
+  if (!rec || !rec.id) return;
+  if (!confirm('Excluir esta licitação? Esta ação não pode ser desfeita.')) return;
+  try {
+    setModalBusy(true, 'Excluindo…');
+    await apiDelete(rec.id);
+    removeRecord(rec.id);
+    closeModal();
+    showBanner('Licitação excluída.', 'info');
+  } catch(e){
+    setModalBusy(false, e.message || 'Erro ao excluir');
+  }
 }
 document.getElementById('modal-close').onclick = closeModal;
 document.getElementById('modal').onclick = (e) => { if (e.target.id === 'modal') closeModal(); };
-function closeModal(){ document.getElementById('modal').classList.remove('open'); }
+function closeModal(){ modalRec = null; document.getElementById('modal').classList.remove('open'); }
+
+// Defaults p/ uma nova licitação (modal em modo criação).
+function newRecordDefaults(){
+  return { id: '', status: 'Em Análise', data: new Date(), horaStr: '', categoria: '', valorEstimado: null, valorFinal: null };
+}
+{
+  const btnNew = document.getElementById('btn-new-licitacao');
+  if (btnNew) btnNew.onclick = () => openModal(newRecordDefaults());
+}
+
 
 // ----------------- BOOT -----------------
 function boot(){

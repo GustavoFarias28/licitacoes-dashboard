@@ -26,3 +26,6 @@ yarn-error.log*
 
 # typescript
 *.tsbuildinfo
+
+# prints/anotações de debug local (não versionar)
+/visualização atual/

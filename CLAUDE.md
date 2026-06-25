@@ -27,7 +27,8 @@ irmão, fora deste repo) e dividido em três arquivos **que espelham aquele orig
 - `app/body.html` — o markup do `<body>` original (sidebar, topbar, painéis, `<canvas>`s, tabela, modal).
   Os `id`s dos elementos são contrato: `public/dashboard.js` os busca por `getElementById`.
 - `public/dashboard.js` — toda a lógica de render (KPIs, 7 gráficos, treemap SVG, Kanban, calendário,
-  filtros, modal). É o JS original **com uma única modificação**: a origem dos dados.
+  filtros, modal) **e de escrita** (modal editável: criar/editar/excluir; filtros cruzados clicáveis).
+  Partiu do JS original; hoje a origem dos dados é o snapshot injetado e as mutações vão para as rotas `/api`.
 
 ### O "seam" de dados (a única costura entre Next.js e o dashboard original)
 
@@ -61,14 +62,38 @@ Chart.js é servido localmente (`public/chart.umd.js`) e carregado em `app/layou
 `strategy="beforeInteractive"` — isso garante `window.Chart` disponível **antes** de `dashboard.js`
 executar (o render dá `new Chart(...)`). Não troque essa ordem.
 
+### O caminho de ESCRITA (CRUD via interface)
+
+O dashboard escreve de volta no Supabase por **Route Handlers** (nunca Supabase no client — a
+service_role fica no servidor). Fluxo:
+
+```
+public/dashboard.js  apiPost/apiPatch/apiDelete  ──fetch──►  app/api/licitacoes(/[id])
+   • atualiza state.records em memória (normalizeRecord)        • valida domínios (lib/domain.ts)
+     + render() + triggerRevalidate()                          • mapeia camelCase→snake_case (lib/licitacaoMapping.ts)
+                                                               • getSupabaseServer() (service_role)
+```
+
+- As rotas (`POST` coleção, `PATCH`/`DELETE` por `id`) ficam atrás do **mesmo Basic Auth** do
+  `middleware.ts` (o `matcher` cobre `/api`); o `fetch` do browser reusa o header da sessão.
+- `app/api/revalidate` (`revalidatePath('/')`) é disparado fire-and-forget após cada escrita para
+  refletir a mudança em reloads/outros usuários.
+- **`id` é a chave de UPDATE/DELETE** — tratado como **string** ponta a ponta (a coluna é inteira;
+  string evita perda de precisão se virar bigint). Editar célula/modal manda só os campos alterados.
+
 ### Contrato Supabase ↔ dashboard (onde editar ao mudar dados)
 
-`lib/snapshot.ts` é o único lugar que conhece o schema do banco. Mapeia colunas `snake_case` para o
-record `camelCase` que o `dashboard.js` espera, e **deriva** campos que o dashboard usa mas não existem
-no banco: `dataStr` (DD/MM/YYYY), `ano`, `mes` (0-11) — derivados por **fatiamento de string** da data
-(NÃO via `new Date(...).getMonth()`, para não sofrer drift de fuso, já que a Vercel roda em UTC).
-`categoria` vai cru (o dashboard faz o split por `;`/`/`). Se adicionar/renomear coluna no Supabase,
-ajuste aqui.
+`lib/licitacaoMapping.ts` é a **fonte única** do schema: `SELECT_COLUMNS`, `rowToRecord` (leitura,
+usada por `lib/snapshot.ts`) e `validateInput` (escrita, usada pelas rotas). Mapeia `snake_case`↔
+`camelCase` e **deriva** campos que o dashboard usa mas não existem no banco: `dataStr` (DD/MM/YYYY),
+`horaStr`, `ano`, `mes` (0-11) — por **fatiamento de string** da data (NÃO via `new Date(...).getMonth()`,
+para não sofrer drift de fuso). Na escrita, o inverso: `data_abertura` é montada por concatenação
+(`YYYY-MM-DDTHH:MM:00`), **nunca** via `toISOString()`. `categoria` é multivalorada (`"A; B"`; o
+dashboard faz o split por `;`/`/`). Se adicionar/renomear coluna no Supabase, ajuste aqui.
+
+`lib/domain.ts` é a **fonte única dos domínios de validação** (comerciais, categorias, status,
+statusColors, motivos de declínio). É validado no servidor E injetado no snapshot (`SNAPSHOT.domain`)
+para popular os dropdowns — o `dashboard.js` lê de lá (com fallback). Mude as listas só aqui.
 
 `op_link` guarda a URL **absoluta** da pasta do projeto no SharePoint (`https://tiavantia.sharepoint.com/...`);
 o dashboard a renderiza como link "OP «número»" na tabela, no Kanban e no modal. Linhas sem link → `null`.
@@ -77,8 +102,9 @@ o dashboard a renderiza como link "OP «número»" na tabela, no Kanban e no mod
 
 - `middleware.ts`: HTTP Basic Auth (senha única compartilhada via env vars). **Fail-closed em produção**
   (se as vars não estiverem setadas, bloqueia em vez de expor). Em dev, libera sem as vars.
-- Atualização dos dados: **ISR `revalidate = 300`** (5 min). Para refletir inserções na hora no futuro,
-  o plano é um Route Handler `/api/revalidate` chamado pelo processo de ingestão (ainda não implementado).
+- Atualização dos dados: **ISR `revalidate = 300`** (5 min) para inserções externas (ingestão). As
+  escritas pela interface chamam `/api/revalidate` (já implementado) para propagar na hora; a sessão que
+  escreveu já reflete via `state.records` em memória.
 
 ## Pegadinhas
 
