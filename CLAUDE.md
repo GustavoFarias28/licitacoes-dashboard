@@ -15,7 +15,7 @@ npx tsc --noEmit   # checagem de tipos (use isto como "lint" — não há ESLint
 Não há suíte de testes. A verificação padrão é `npx tsc --noEmit` + rodar `npm run dev`/`npm run build` e conferir a página.
 
 Variáveis de ambiente (copie `.env.local.example` → `.env.local`; todas são lidas só no servidor):
-`SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `BASIC_AUTH_USER`, `BASIC_AUTH_PASSWORD`.
+`SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `ACCESS_PASSWORD`.
 
 ## Arquitetura — o ponto central a entender
 
@@ -74,8 +74,9 @@ public/dashboard.js  apiPost/apiPatch/apiDelete  ──fetch──►  app/api/l
                                                                • getSupabaseServer() (service_role)
 ```
 
-- As rotas (`POST` coleção, `PATCH`/`DELETE` por `id`) ficam atrás do **mesmo Basic Auth** do
-  `middleware.ts` (o `matcher` cobre `/api`); o `fetch` do browser reusa o header da sessão.
+- As rotas (`POST` coleção, `PATCH`/`DELETE` por `id`) ficam atrás da **mesma proteção** do
+  `middleware.ts` (o `matcher` cobre `/api`); o `fetch` do browser reusa o cookie de sessão
+  automaticamente. Sem cookie válido, o middleware responde **401 JSON** em rotas `/api/*`.
 - `app/api/revalidate` (`revalidatePath('/')`) é disparado fire-and-forget após cada escrita para
   refletir a mudança em reloads/outros usuários.
 - **`id` é a chave de UPDATE/DELETE** — tratado como **string** ponta a ponta (a coluna é inteira;
@@ -100,8 +101,12 @@ o dashboard a renderiza como link "OP «número»" na tabela, no Kanban e no mod
 
 ### Acesso e atualização
 
-- `middleware.ts`: HTTP Basic Auth (senha única compartilhada via env vars). **Fail-closed em produção**
-  (se as vars não estiverem setadas, bloqueia em vez de expor). Em dev, libera sem as vars.
+- `middleware.ts`: **senha única compartilhada** (`ACCESS_PASSWORD`). A página `/login` (campo único de
+  senha) envia para `/api/auth/login`, que valida e grava o cookie `avantia_auth` (= SHA-256 da senha,
+  `HttpOnly`); o middleware compara esse cookie a cada request. `lib/auth.ts` é a fonte única (nome do
+  cookie, Max-Age, `sha256Hex`). Não autenticado → redireciona para `/login` (página) ou 401 (`/api/*`).
+  **Fail-closed em produção** (sem `ACCESS_PASSWORD`, bloqueia em vez de expor). Em dev, libera sem a var.
+  Logout: `POST /api/auth/logout` (apaga o cookie); ainda sem botão na UI.
 - Atualização dos dados: **ISR `revalidate = 300`** (5 min) para inserções externas (ingestão). As
   escritas pela interface chamam `/api/revalidate` (já implementado) para propagar na hora; a sessão que
   escreveu já reflete via `state.records` em memória.

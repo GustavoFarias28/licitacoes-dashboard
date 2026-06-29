@@ -1,48 +1,50 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { AUTH_COOKIE, sha256Hex } from '@/lib/auth';
 
 /**
- * Proteção de acesso por HTTP Basic Auth (usuário + senha compartilhados).
- * Credenciais lidas das variáveis de ambiente BASIC_AUTH_USER / BASIC_AUTH_PASSWORD.
+ * Proteção de acesso por senha única compartilhada.
  *
- * Comportamento por ambiente:
- *  - produção: se as variáveis NÃO estiverem definidas, BLOQUEIA (fail-closed) — nunca
- *    expõe os dados confidenciais por configuração incompleta.
- *  - desenvolvimento: se não definidas, libera (para não atrapalhar o `npm run dev`).
+ * O fluxo: a página `/login` (campo único de senha) envia a senha para `/api/auth/login`, que valida
+ * contra `ACCESS_PASSWORD` e grava o cookie `avantia_auth` (= SHA-256 da senha). Este middleware
+ * compara o cookie com o hash esperado a cada request.
+ *
+ * Comportamento por ambiente quando `ACCESS_PASSWORD` NÃO está definida:
+ *  - produção: BLOQUEIA (fail-closed) — nunca expõe os dados por configuração incompleta.
+ *  - desenvolvimento: libera (para não atrapalhar o `npm run dev`).
  */
-export function middleware(req: NextRequest) {
-  const user = process.env.BASIC_AUTH_USER;
-  const pass = process.env.BASIC_AUTH_PASSWORD;
 
-  if (!user || !pass) {
+// Rotas liberadas sem cookie (senão não haveria como autenticar).
+const PUBLIC_PATHS = ['/login', '/api/auth/login', '/api/auth/logout'];
+
+export async function middleware(req: NextRequest) {
+  const { pathname } = req.nextUrl;
+
+  if (PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(p + '/'))) {
+    return NextResponse.next();
+  }
+
+  const pass = process.env.ACCESS_PASSWORD;
+  if (!pass) {
     if (process.env.NODE_ENV === 'production') {
       return new NextResponse(
-        'Proteção de acesso não configurada (defina BASIC_AUTH_USER e BASIC_AUTH_PASSWORD).',
+        'Proteção de acesso não configurada (defina ACCESS_PASSWORD).',
         { status: 503 }
       );
     }
     return NextResponse.next();
   }
 
-  const auth = req.headers.get('authorization');
-  if (auth) {
-    const [scheme, encoded] = auth.split(' ');
-    if (scheme === 'Basic' && encoded) {
-      const decoded = atob(encoded); // Edge runtime expõe atob
-      const idx = decoded.indexOf(':');
-      const u = decoded.slice(0, idx);
-      const p = decoded.slice(idx + 1);
-      if (u === user && p === pass) {
-        return NextResponse.next();
-      }
-    }
+  const cookie = req.cookies.get(AUTH_COOKIE)?.value;
+  if (cookie && cookie === (await sha256Hex(pass))) {
+    return NextResponse.next();
   }
 
-  return new NextResponse('Autenticação necessária.', {
-    status: 401,
-    headers: {
-      'WWW-Authenticate': 'Basic realm="Dashboard de Licitações Avantia", charset="UTF-8"',
-    },
-  });
+  // Não autenticado: API recebe 401 JSON (fetch do dashboard trata o erro);
+  // navegação de página é redirecionada para a tela de login.
+  if (pathname.startsWith('/api/')) {
+    return NextResponse.json({ error: 'Autenticação necessária.' }, { status: 401 });
+  }
+  return NextResponse.redirect(new URL('/login', req.url));
 }
 
 // Protege todas as rotas, exceto assets internos do Next.
