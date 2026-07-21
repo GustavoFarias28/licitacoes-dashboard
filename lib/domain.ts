@@ -61,6 +61,7 @@ export const MOTIVOS_DECLINIO = [
   'Distanciamento do escopo',
   'Certificados',
   'Localização',
+  'Índices financeiros insuficientes',
 ] as const;
 
 /** Objeto único injetado no snapshot e lido pelo dashboard.js (SNAPSHOT.domain). */
