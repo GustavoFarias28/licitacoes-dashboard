@@ -9,6 +9,10 @@
       <span class="icon">▣</span>
       <span>Mercado</span>
     </button>
+    <button class="nav-item" data-tab="status">
+      <span class="icon">◪</span>
+      <span>Status</span>
+    </button>
     <button class="nav-item" data-tab="concorrencia">
       <span class="icon">⚔</span>
       <span>Concorrência</span>
@@ -113,10 +117,52 @@
           </div>
         </div>
 
+      </section>
+
+      <!-- STATUS -->
+      <section class="tab-panel" id="panel-status">
         <div class="table-card" style="margin-bottom: 16px;">
-          <h3 class="chart-title">Próximas oportunidades — "Vamos Participar"</h3>
-          <div id="tbl-vamos-wrap">
-            <table id="tbl-vamos">
+          <h3 class="chart-title">Vamos Participar</h3>
+          <div id="tbl-status-vamos-wrap">
+            <table id="tbl-status-vamos">
+              <thead>
+                <tr>
+                  <th>Data</th>
+                  <th>Nome</th>
+                  <th>UF</th>
+                  <th>Categoria</th>
+                  <th>Comercial</th>
+                  <th class="num">Valor Estimado</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="table-card" style="margin-bottom: 16px;">
+          <h3 class="chart-title">Participamos</h3>
+          <div id="tbl-status-participamos-wrap">
+            <table id="tbl-status-participamos">
+              <thead>
+                <tr>
+                  <th>Data</th>
+                  <th>Nome</th>
+                  <th>UF</th>
+                  <th>Categoria</th>
+                  <th>Comercial</th>
+                  <th class="num">Valor Estimado</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="table-card" style="margin-bottom: 16px;">
+          <h3 class="chart-title">Aguardando Republicação</h3>
+          <div id="tbl-status-republicacao-wrap">
+            <table id="tbl-status-republicacao">
               <thead>
                 <tr>
                   <th>Data</th>
@@ -186,23 +232,32 @@
 
       <!-- CONCORRÊNCIA -->
       <section class="tab-panel" id="panel-concorrencia">
+        <div class="conc-controls">
+          <div id="conc-block-tabs" class="block-tabs">
+            <button type="button" class="block-tab active" data-block="cftv">CFTV</button>
+            <button type="button" class="block-tab" data-block="ti">T.I.</button>
+            <button type="button" class="block-tab" data-block="outros">Outros</button>
+          </div>
+          <select id="conc-outros-cat" class="conc-outros-select" style="display:none;"></select>
+        </div>
         <div id="conc-kpis" class="kpi-grid" style="margin-bottom:22px;"></div>
+        <div id="conc-empty" class="conc-empty" style="display:none;">Sem licitações com concorrente identificado neste bloco.</div>
         <div class="charts-grid">
           <div class="chart-card">
-            <h3 class="chart-title">Top concorrentes — por nº de arremates</h3>
-            <div class="chart-canvas-wrap"><canvas id="chart-conc-topn"></canvas></div>
+            <h3 class="chart-title">Participação dos concorrentes — por nº de arremates</h3>
+            <div class="chart-canvas-wrap"><canvas id="chart-conc-share"></canvas></div>
           </div>
           <div class="chart-card">
-            <h3 class="chart-title">Top concorrentes — por R$ arrematado</h3>
-            <div class="chart-canvas-wrap"><canvas id="chart-conc-topr"></canvas></div>
+            <h3 class="chart-title">Volume arrematado por concorrente (R$)</h3>
+            <div class="chart-canvas-wrap"><canvas id="chart-conc-polar"></canvas></div>
           </div>
           <div class="chart-card">
-            <h3 class="chart-title">Top fabricantes / soluções ofertadas</h3>
-            <div class="chart-canvas-wrap"><canvas id="chart-conc-sol"></canvas></div>
+            <h3 class="chart-title">Mapa competitivo — participações × ticket médio</h3>
+            <div class="chart-canvas-wrap"><canvas id="chart-conc-bubble"></canvas></div>
           </div>
           <div class="chart-card">
-            <h3 class="chart-title">Distribuição da redução estimado → arrematado</h3>
-            <div class="chart-canvas-wrap"><canvas id="chart-conc-hist"></canvas></div>
+            <h3 class="chart-title">Fabricantes / soluções ofertadas</h3>
+            <div class="chart-canvas-wrap"><canvas id="chart-conc-radar"></canvas></div>
           </div>
         </div>
         <div class="table-card" style="margin-top:16px;">

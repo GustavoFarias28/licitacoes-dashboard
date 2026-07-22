@@ -344,6 +344,59 @@ html, body {
   gap: 14px;
   margin-bottom: 22px;
 }
+/* Controles da aba Concorrência (segmented control de blocos + sub-filtro) */
+.conc-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+.block-tabs {
+  display: inline-flex;
+  background: var(--border-soft);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px;
+  gap: 2px;
+}
+.block-tab {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 6px 16px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: all 0.12s;
+}
+.block-tab:hover { color: var(--av-navy); }
+.block-tab.active {
+  background: var(--av-navy);
+  color: #fff;
+  box-shadow: var(--shadow);
+}
+.conc-outros-select {
+  font-family: inherit;
+  font-size: 12.5px;
+  color: var(--av-navy);
+  padding: 7px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: #fff;
+  cursor: pointer;
+}
+.conc-empty {
+  padding: 40px 24px;
+  text-align: center;
+  color: var(--text-muted);
+  background: var(--card-bg);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  margin-bottom: 22px;
+}
 .chart-card {
   background: var(--card-bg);
   border: 1px solid var(--border);
@@ -507,6 +560,17 @@ html, body {
   border-color: var(--av-blue);
   box-shadow: var(--shadow);
   transform: translateY(-1px);
+}
+.kanban-card[draggable="true"] { cursor: grab; }
+.kanban-card.dragging {
+  opacity: 0.45;
+  cursor: grabbing;
+  box-shadow: var(--shadow);
+}
+.kanban-col.drag-over {
+  outline: 2px dashed var(--av-orange);
+  outline-offset: -2px;
+  background: rgba(232, 129, 38, 0.06);
 }
 .kanban-card-title {
   font-weight: 600;

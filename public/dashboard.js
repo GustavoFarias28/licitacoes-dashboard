@@ -61,6 +61,8 @@ const state = {
   calDate: new Date(),
   tableSort: { key: 'data', dir: 'desc' },
   tableSearch: '',
+  concBlock: 'cftv',
+  concOutrosCat: '__all__',
 };
 
 // ----------------- HELPERS -----------------
@@ -201,6 +203,7 @@ document.getElementById('btn-clear-filters').onclick = () => {
 // ----------------- NAVIGATION -----------------
 const TAB_LABELS = {
   dashboard: { title: 'Mercado', subtitle: 'Visão geral do mercado público — KPIs e gráficos' },
+  status: { title: 'Status', subtitle: 'Oportunidades por status — Vamos Participar, Participamos e Aguardando Republicação' },
   concorrencia: { title: 'Concorrência', subtitle: 'Análise competitiva — quem venceu, qual solução e por quanto' },
   kanban: { title: 'Kanban', subtitle: 'Editais agrupados por status' },
   calendar: { title: 'Calendário', subtitle: 'Editais pela data de abertura' },
@@ -228,7 +231,7 @@ function render(){
   renderBanner(recs);
   renderKpis(recs);
   renderCharts(recs);
-  renderVamosTable(recs);
+  renderStatusTables(recs);
   renderAllTable(recs);
   if (document.querySelector('.nav-item.active')?.dataset.tab === 'concorrencia') renderConcorrencia();
   if (document.querySelector('.nav-item.active')?.dataset.tab === 'kanban') renderKanban();
@@ -656,13 +659,37 @@ function extractCategorias(rec){
   return [...new Set(parts)];
 }
 
+// Blocos da aba Concorrência. Um record entra num bloco pelas suas categorias
+// (multivaloradas — um record pode aparecer em mais de um bloco). CFTV e T.I. são os
+// dois grandes nichos (concorrentes distintos); "Outros" agrega as demais categorias,
+// com sub-filtro opcional por categoria específica.
+function recInBlock(rec, block, outrosCat){
+  const cats = extractCategorias(rec);
+  if (block === 'cftv') return cats.includes('CFTV');
+  if (block === 'ti') return cats.includes('T.I.');
+  // Outros: tem ao menos uma categoria fora de {CFTV, T.I.}
+  const outros = cats.filter(c => c !== 'CFTV' && c !== 'T.I.');
+  if (outros.length === 0) return false;
+  if (outrosCat && outrosCat !== '__all__') return outros.includes(outrosCat);
+  return true;
+}
+
 function renderConcorrencia(){
-  const base = filteredRecords();
-  const recs = base.filter(r => extractCompetitors(r).length > 0);
+  const block = state.concBlock || 'cftv';
+  const outrosCat = state.concOutrosCat || '__all__';
+
+  // Reflete o bloco ativo nos controles.
+  document.querySelectorAll('#conc-block-tabs .block-tab').forEach(b =>
+    b.classList.toggle('active', b.dataset.block === block));
+  const outrosSel = document.getElementById('conc-outros-cat');
+  if (outrosSel) outrosSel.style.display = (block === 'outros') ? '' : 'none';
+
+  const base = filteredRecords().filter(r => extractCompetitors(r).length > 0);
+  const recs = base.filter(r => recInBlock(r, block, outrosCat));
 
   // Acumuladores
   const compMap = new Map();        // nome → {n, valor}
-  const solMap = new Map();         // nome → count
+  const solMap = new Map();         // fabricante → count
   recs.forEach(r => {
     const comps = extractCompetitors(r);
     comps.forEach(c => {
@@ -684,101 +711,123 @@ function renderConcorrencia(){
   });
   const avgRed = reds.length ? reds.reduce((a,b)=>a+b,0)/reds.length : 0;
   const volTotal = recs.reduce((a,r) => a + (typeof r.valorFinal === 'number' ? r.valorFinal : 0), 0);
-  const withSol = recs.filter(r => extractSolutions(r).length > 0).length;
-  const cobertura = recs.length ? (withSol / recs.length * 100) : 0;
+  const compByN = [...compMap.entries()].sort((a,b)=>b[1].n - a[1].n);
+  const compByR = [...compMap.entries()].filter(([,v])=>v.valor>0).sort((a,b)=>b[1].valor-a[1].valor);
+  const solByN  = [...solMap.entries()].sort((a,b)=>b[1]-a[1]);
 
-  // === KPIs ===
+  // === KPIs (por bloco) ===
   const kpis = [
-    { label: 'Licitações analisadas', value: recs.length, hint: 'com concorrente identificado' },
+    { label: 'Licitações no bloco', value: recs.length, hint: 'com concorrente identificado' },
     { label: 'Concorrentes únicos', value: compMap.size, hint: '' },
     { label: 'Volume arrematado', value: fmtBRLshort(volTotal), hint: 'soma do valor final' },
     { label: 'Redução média', value: avgRed.toFixed(1) + '%', hint: `${reds.length} pares estimado→final` },
-    { label: 'Fabricantes mapeados', value: solMap.size, hint: '' },
-    { label: 'Cobertura de solução', value: cobertura.toFixed(0) + '%', hint: `${withSol}/${recs.length} licitações` },
+    { label: 'Concorrente líder', value: compByN.length ? compByN[0][0] : '—', hint: compByN.length ? `${compByN[0][1].n} arremates` : '' },
+    { label: 'Fabricante líder', value: solByN.length ? solByN[0][0] : '—', hint: solByN.length ? `${solByN[0][1]} aparições` : '' },
   ];
   document.getElementById('conc-kpis').innerHTML = kpis.map(k => `
     <div class="kpi-card">
       <div class="kpi-label">${escapeHtml(k.label)}</div>
-      <div class="kpi-value">${escapeHtml(String(k.value))}</div>
+      <div class="kpi-value"${String(k.value).length > 12 ? ' style="font-size:15px"' : ''}>${escapeHtml(String(k.value))}</div>
       ${k.hint ? `<div class="kpi-hint">${escapeHtml(k.hint)}</div>` : ''}
     </div>
   `).join('');
 
-  // === Gráfico: Top concorrentes por nº ===
-  const compTopN = [...compMap.entries()].sort((a,b)=>b[1].n - a[1].n).slice(0, 15);
-  destroyChart('concTopN');
-  state.charts.concTopN = new Chart(document.getElementById('chart-conc-topn'), {
-    type: 'bar',
-    data: {
-      labels: compTopN.map(([k])=>k),
-      datasets: [{ data: compTopN.map(([,v])=>v.n), backgroundColor: '#0E2447', borderRadius:4 }],
-    },
-    options: chartOptsBarH(),
-  });
+  const grid = document.querySelector('#panel-concorrencia .charts-grid');
+  const emptyEl = document.getElementById('conc-empty');
 
-  // === Gráfico: Top concorrentes por R$ ===
-  const compTopR = [...compMap.entries()].filter(([,v])=>v.valor>0).sort((a,b)=>b[1].valor-a[1].valor).slice(0, 15);
-  destroyChart('concTopR');
-  state.charts.concTopR = new Chart(document.getElementById('chart-conc-topr'), {
-    type: 'bar',
-    data: {
-      labels: compTopR.map(([k])=>k),
-      datasets: [{ data: compTopR.map(([,v])=>v.valor), backgroundColor: '#E88126', borderRadius:4 }],
-    },
+  // Bloco sem dados: esconde os gráficos, mostra aviso, zera a tabela.
+  if (recs.length === 0){
+    ['concShare','concPolar','concBubble','concRadar'].forEach(destroyChart);
+    if (grid) grid.style.display = 'none';
+    if (emptyEl) emptyEl.style.display = '';
+    renderConcorrenciaTable(recs);
+    return;
+  }
+  if (grid) grid.style.display = '';
+  if (emptyEl) emptyEl.style.display = 'none';
+
+  // === 1) Doughnut — participação dos concorrentes por nº de arremates (top 8 + Outros) ===
+  const topShare = compByN.slice(0, 8);
+  const restShare = compByN.slice(8).reduce((a,[,v]) => a + v.n, 0);
+  const shareLabels = topShare.map(([k]) => k);
+  const shareData = topShare.map(([,v]) => v.n);
+  if (restShare > 0){ shareLabels.push('Outros concorrentes'); shareData.push(restShare); }
+  const totalArrem = compByN.reduce((a,[,v]) => a + v.n, 0);
+  destroyChart('concShare');
+  state.charts.concShare = new Chart(document.getElementById('chart-conc-share'), {
+    type: 'doughnut',
+    data: { labels: shareLabels, datasets: [{ data: shareData, backgroundColor: PALETTE, borderWidth: 2, borderColor: '#fff' }] },
     options: {
-      indexAxis: 'y', responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { display:false }, tooltip: { callbacks: { label: c => fmtBRL(c.parsed.x) } } },
-      scales: {
-        x: { beginAtZero:true,
-             ticks: { color:'#71757B',
-               callback: v => v >= 1e6 ? 'R$ '+(v/1e6).toFixed(1)+'M' : v >= 1e3 ? 'R$ '+(v/1e3).toFixed(0)+'K' : 'R$ '+v },
-             grid: { color:'#ECEEF2' } },
-        y: { ticks: { color:'#71757B' }, grid: { display:false } },
+      responsive: true, maintainAspectRatio: false, cutout: '58%',
+      plugins: {
+        legend: { position: 'right', labels: { boxWidth: 12, font: { size: 11 } } },
+        title: { display: true, text: `${totalArrem} arremates no bloco`, color: '#71757B', font: { size: 11, weight: 'normal' } },
+        tooltip: { callbacks: { label: c => `${c.label}: ${c.parsed} (${totalArrem ? (c.parsed/totalArrem*100).toFixed(1) : 0}%)` } },
       },
     },
   });
 
-  // === Gráfico: Top fabricantes ===
-  const solTop = [...solMap.entries()].sort((a,b)=>b[1]-a[1]);
-  destroyChart('concSol');
-  state.charts.concSol = new Chart(document.getElementById('chart-conc-sol'), {
-    type: 'bar',
-    data: {
-      labels: solTop.map(([k])=>k),
-      datasets: [{ data: solTop.map(([,v])=>v), backgroundColor: '#5278B5', borderRadius:4 }],
-    },
-    options: chartOptsBarH(),
-  });
-
-  // === Histograma de redução ===
-  const histLabels = ['0-10%','10-20%','20-30%','30-40%','40-50%','50-60%','60-70%','70-80%','80-90%','90%+'];
-  const histData = new Array(10).fill(0);
-  reds.forEach(red => {
-    const idx = Math.min(9, Math.max(0, Math.floor(red/10)));
-    histData[idx]++;
-  });
-  destroyChart('concHist');
-  state.charts.concHist = new Chart(document.getElementById('chart-conc-hist'), {
-    type: 'bar',
-    data: {
-      labels: histLabels,
-      datasets: [{ data: histData, backgroundColor: '#0E2447', hoverBackgroundColor: '#E88126', borderRadius:4 }],
-    },
+  // === 2) Polar Area — R$ arrematado por concorrente (top 10) ===
+  const topR = compByR.slice(0, 10);
+  destroyChart('concPolar');
+  state.charts.concPolar = new Chart(document.getElementById('chart-conc-polar'), {
+    type: 'polarArea',
+    data: { labels: topR.map(([k]) => k), datasets: [{ data: topR.map(([,v]) => v.valor), backgroundColor: PALETTE.map(c => c + 'cc'), borderWidth: 1, borderColor: '#fff' }] },
     options: {
       responsive: true, maintainAspectRatio: false,
       plugins: {
-        legend: { display:false },
-        title: { display:true, text: `n = ${reds.length}  •  média ${avgRed.toFixed(1)}%`, color: '#71757B', font: { size: 11, weight: 'normal' } },
-        tooltip: { callbacks: { label: c => `${c.parsed.y} licitação${c.parsed.y === 1 ? '' : 'ões'}` } },
+        legend: { position: 'right', labels: { boxWidth: 12, font: { size: 11 } } },
+        tooltip: { callbacks: { label: c => `${c.label}: ${fmtBRL(c.raw)}` } },
+      },
+      scales: { r: { ticks: { display: false }, grid: { color: '#ECEEF2' } } },
+    },
+  });
+
+  // === 3) Bubble — mapa competitivo: x = participações, y = ticket médio, r ∝ volume total ===
+  const bubbleSrc = compByN.slice(0, 25);
+  const maxVal = Math.max(1, ...bubbleSrc.map(([,v]) => v.valor));
+  const bubblePts = bubbleSrc.map(([k,v]) => ({
+    x: v.n,
+    y: v.n ? v.valor / v.n : 0,
+    r: 6 + 22 * Math.sqrt((v.valor || 0) / maxVal),
+    _label: k, _total: v.valor,
+  }));
+  destroyChart('concBubble');
+  state.charts.concBubble = new Chart(document.getElementById('chart-conc-bubble'), {
+    type: 'bubble',
+    data: { datasets: [{ data: bubblePts, backgroundColor: 'rgba(82,120,181,0.55)', borderColor: '#0E2447', borderWidth: 1 }] },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: {
+          label: c => {
+            const p = c.raw;
+            return `${p._label}: ${p.x} participaç${p.x === 1 ? 'ão' : 'ões'} · ticket médio ${fmtBRLshort(p.y)} · total ${fmtBRLshort(p._total)}`;
+          },
+        } },
       },
       scales: {
-        x: { ticks: { color:'#71757B' }, grid: { display:false } },
-        y: { beginAtZero:true, ticks: { color:'#71757B', stepSize:1 }, grid: { color:'#ECEEF2' } },
+        x: { beginAtZero: true, title: { display: true, text: 'Nº de participações', color: '#71757B' }, ticks: { precision: 0, color: '#71757B' }, grid: { color: '#ECEEF2' } },
+        y: { beginAtZero: true, title: { display: true, text: 'Ticket médio (R$)', color: '#71757B' }, ticks: { color: '#71757B', callback: v => v >= 1e6 ? (v/1e6).toFixed(1)+'M' : v >= 1e3 ? (v/1e3).toFixed(0)+'K' : v }, grid: { color: '#ECEEF2' } },
       },
     },
   });
 
-  // === Tabela detalhada ===
+  // === 4) Radar — fabricantes / soluções ofertadas no bloco (top 6) ===
+  const topSol = solByN.slice(0, 6);
+  destroyChart('concRadar');
+  state.charts.concRadar = new Chart(document.getElementById('chart-conc-radar'), {
+    type: 'radar',
+    data: { labels: topSol.map(([k]) => k), datasets: [{ label: 'Aparições', data: topSol.map(([,v]) => v), backgroundColor: 'rgba(232,129,38,0.22)', borderColor: '#E88126', borderWidth: 2, pointBackgroundColor: '#E88126' }] },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => `${c.label}: ${c.parsed.r}` } } },
+      scales: { r: { beginAtZero: true, ticks: { precision: 0, backdropColor: 'transparent', color: '#71757B' }, grid: { color: '#ECEEF2' }, pointLabels: { font: { size: 11 }, color: '#0E2447' } } },
+    },
+  });
+
+  // === Tabela detalhada (mesmo recorte de bloco) ===
   renderConcorrenciaTable(recs);
 }
 
@@ -814,6 +863,21 @@ function renderConcorrenciaTable(recs){
     </tr>`).join('')
     : '<tr><td colspan="9" style="text-align:center;color:var(--text-muted);padding:24px;">Sem licitações com concorrente identificado para os filtros atuais</td></tr>';
 }
+
+// Controles da aba Concorrência: alternância de bloco (CFTV / T.I. / Outros) e
+// sub-filtro de categoria dentro de "Outros". Executa no load (o markup já está no DOM).
+(function setupConcorrenciaControls(){
+  const sel = document.getElementById('conc-outros-cat');
+  if (sel){
+    const outrosCats = CATEGORIAS.filter(c => c !== 'CFTV' && c !== 'T.I.');
+    sel.innerHTML = '<option value="__all__">Todas de "Outros"</option>' +
+      outrosCats.map(c => `<option value="${escapeAttr(c)}">${escapeHtml(c)}</option>`).join('');
+    sel.onchange = () => { state.concOutrosCat = sel.value; renderConcorrencia(); };
+  }
+  document.querySelectorAll('#conc-block-tabs .block-tab').forEach(btn => {
+    btn.onclick = () => { state.concBlock = btn.dataset.block; renderConcorrencia(); };
+  });
+})();
 
 
 // ----------------- TREEMAP (custom SVG, algoritmo squarified) -----------------
@@ -987,16 +1051,19 @@ function renderValorCategoriaTreemap(recs){
   });
 }
 
-function renderVamosTable(recs){
-  const tbody = document.querySelector('#tbl-vamos tbody');
-  const vamos = recs.filter(r => r.status === 'Vamos Participar')
+// Renderiza uma "caixa" de oportunidades filtrada por um status específico
+// (usada na aba Status). Estrutura/linhas idênticas à antiga tabela "Vamos Participar".
+function renderStatusBox(recs, status, tblSelector){
+  const tbody = document.querySelector(tblSelector + ' tbody');
+  if (!tbody) return;
+  const rows = recs.filter(r => r.status === status)
     .sort((a,b)=> (a.data?.getTime() || 0) - (b.data?.getTime() || 0));
-  if (vamos.length === 0){
-    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; padding:24px; color:var(--text-muted);">Nenhum edital "Vamos Participar" no momento.</td></tr>`;
+  if (rows.length === 0){
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; padding:24px; color:var(--text-muted);">Nenhum edital "${escapeHtml(status)}" no momento.</td></tr>`;
     return;
   }
-  tbody.innerHTML = vamos.map((r,i)=>`
-    <tr style="cursor:pointer;" data-idx="${i}" data-vamos="1">
+  tbody.innerHTML = rows.map((r,i)=>`
+    <tr style="cursor:pointer;" data-idx="${i}">
       <td style="white-space:nowrap;">${comHora(r, fmtDate(r.data))}</td>
       <td>${r.opLink ? `<a class="op-row-link" href="${escapeAttr(r.opLink)}" target="_blank" rel="noopener" title="OP ${escapeAttr(String(r.op||''))} — abrir pasta no SharePoint" onclick="event.stopPropagation();">OP ${escapeHtml(String(r.op||''))}</a>` : ''}${escapeHtml(r.nome)}</td>
       <td>${escapeHtml(r.uf)}</td>
@@ -1005,9 +1072,16 @@ function renderVamosTable(recs){
       <td class="num">${r.valorEstimado != null ? fmtBRL(r.valorEstimado) : '—'}</td>
     </tr>
   `).join('');
-  tbody.querySelectorAll('tr[data-vamos]').forEach(tr => {
-    tr.onclick = () => openModal(vamos[parseInt(tr.dataset.idx,10)]);
+  tbody.querySelectorAll('tr[data-idx]').forEach(tr => {
+    tr.onclick = () => openModal(rows[parseInt(tr.dataset.idx,10)]);
   });
+}
+
+// Aba Status: três caixas na ordem Vamos Participar → Participamos → Aguardando Republicação.
+function renderStatusTables(recs){
+  renderStatusBox(recs, 'Vamos Participar', '#tbl-status-vamos');
+  renderStatusBox(recs, 'Participamos', '#tbl-status-participamos');
+  renderStatusBox(recs, 'Aguardando Republicação', '#tbl-status-republicacao');
 }
 
 function renderAllTable(recs){
@@ -1120,7 +1194,7 @@ function renderKanban(){
     const color = STATUS_COLORS[status] || '#C4C7CD';
     const arr = groups[status] || [];
     const cards = arr.map((r,idx) => `
-      <div class="kanban-card" data-status="${escapeAttr(status)}" data-idx="${idx}" style="border-left-color:${color}">
+      <div class="kanban-card" draggable="true" data-id="${escapeAttr(String(r.id))}" data-status="${escapeAttr(status)}" data-idx="${idx}" style="border-left-color:${color}">
         <div class="kanban-card-title">${escapeHtml(r.nome || '(sem nome)')}</div>
         <div class="kanban-card-meta">
           ${r.uf ? `<span class="pill pill-uf">${escapeHtml(r.uf)}</span>` : ''}
@@ -1150,7 +1224,50 @@ function renderKanban(){
       const idx = parseInt(el.dataset.idx, 10);
       openModal(groups[st][idx]);
     };
+    // Arrastar o card (drag nativo HTML5). O clique simples continua abrindo o modal;
+    // um drag real não dispara 'click'.
+    el.addEventListener('dragstart', (e) => {
+      el.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', el.dataset.id || '');
+    });
+    el.addEventListener('dragend', () => {
+      el.classList.remove('dragging');
+      board.querySelectorAll('.kanban-col.drag-over').forEach(c => c.classList.remove('drag-over'));
+    });
   });
+
+  // Colunas = alvos de soltura. Soltar um card muda seu status e persiste no banco.
+  board.querySelectorAll('.kanban-col').forEach(col => {
+    col.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      col.classList.add('drag-over');
+    });
+    col.addEventListener('dragleave', (e) => {
+      if (!col.contains(e.relatedTarget)) col.classList.remove('drag-over');
+    });
+    col.addEventListener('drop', (e) => {
+      e.preventDefault();
+      col.classList.remove('drag-over');
+      const id = e.dataTransfer.getData('text/plain');
+      moveKanbanCard(id, col.dataset.status);
+    });
+  });
+}
+
+// Move um card do Kanban para outro status (via drag-and-drop) e persiste no banco.
+// Reusa o mesmo caminho de escrita do modal: apiPatch → upsertRecord (re-render + revalidate).
+function moveKanbanCard(id, novoStatus){
+  if (!id || !novoStatus) return;
+  const rec = state.records.find(r => String(r.id) === String(id));
+  if (!rec || rec.status === novoStatus) return;
+  // Só aceita soltar em colunas de status válidos (evita '(sem status)' / status legados
+  // que o servidor rejeitaria).
+  if (!STATUS_ORDER.includes(novoStatus)) return;
+  apiPatch(id, { status: novoStatus })
+    .then(upsertRecord)
+    .catch(err => { alert('Não foi possível mudar o status: ' + (err && err.message ? err.message : err)); render(); });
 }
 
 // ----------------- CALENDAR -----------------
