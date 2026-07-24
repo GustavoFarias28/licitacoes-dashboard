@@ -44,7 +44,7 @@ export const STATUS_COLORS: Record<string, string> = {
   'Validação': '#E88126',
   'Vamos Participar': '#0E2447',
   'Não Participamos': '#C4C7CD',
-  'Perdemos': '#71757B',
+  'Perdemos': '#D64545',
   'Ganhamos': '#2E9E5B',
   'Aguardando Republicação': '#71757B',
   'Participamos': '#5278B5',
