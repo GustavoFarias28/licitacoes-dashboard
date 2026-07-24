@@ -4,6 +4,7 @@
   --av-navy: #0E2447;
   --av-blue: #5278B5;
   --av-orange: #E88126;
+  --av-green: #2E9E5B;
   --av-gray-1: #E1E3E8;
   --av-gray-2: #D6D8DD;
   --av-gray-3: #C4C7CD;
@@ -25,7 +26,7 @@
   --status-validacao: #E88126;
   --status-vamos: #5278B5;
   --status-perdemos: #71757B;
-  --status-ganhamos: #0E2447;
+  --status-ganhamos: #2E9E5B;
 
   --shadow: 0 1px 3px rgba(14, 36, 71, 0.06), 0 1px 2px rgba(14, 36, 71, 0.04);
   --shadow-lg: 0 4px 12px rgba(14, 36, 71, 0.08);
@@ -308,7 +309,7 @@ html, body {
 }
 .kpi-card.kpi-total::before { background: var(--av-navy); }
 .kpi-card.kpi-estimado::before { background: var(--av-blue); }
-.kpi-card.kpi-ganho::before { background: var(--av-orange); }
+.kpi-card.kpi-ganho::before { background: var(--av-green); }
 .kpi-card.kpi-vamos::before { background: var(--av-blue); }
 .kpi-card.kpi-participacao::before { background: var(--av-navy); }
 .kpi-card.kpi-conversao::before { background: var(--av-orange); }

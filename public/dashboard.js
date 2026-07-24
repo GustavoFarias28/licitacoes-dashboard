@@ -31,12 +31,12 @@ const STATUS_COLORS = DOMAIN.statusColors || {
   'Vamos Participar': '#0E2447',
   'Não Participamos': '#C4C7CD',
   'Perdemos': '#71757B',
-  'Ganhamos': '#0E2447',
+  'Ganhamos': '#2E9E5B',
   'Aguardando Republicação': '#71757B',
   'Participamos': '#5278B5',
 };
 const MOTIVOS_DECLINIO = DOMAIN.motivosDeclinio || [
-  'Atestados','Não declarado','Falta de Parceiros','Sem diferencial tecnológico',
+  'Atestados','Não trabalhado','Falta de Parceiros','Sem diferencial tecnológico',
   'Direcionamento de Fabricante','Falta de R.O.','V. Ref. Baixo',
   'Distanciamento do escopo','Certificados','Localização',
 ];
@@ -138,12 +138,14 @@ function filteredRecords(){
   const fc = getFilterValues('comercial');
   const fk = getFilterValues('categoria');
   const fs = getFilterValues('status');
+  const fm = getFilterValues('motivoDeclinio');
   return state.records.filter(r =>
     (fa.length === 0 || fa.includes(String(r.ano))) &&
     (fu.length === 0 || fu.includes(r.uf)) &&
     (fc.length === 0 || fc.includes(r.comercial)) &&
     (fk.length === 0 || extractCategorias(r).some(c => fk.includes(c))) &&
-    (fs.length === 0 || fs.includes(r.status))
+    (fs.length === 0 || fs.includes(r.status)) &&
+    (fm.length === 0 || fm.includes(r.motivoDeclinio))
   );
 }
 function buildFilterUI(){
@@ -495,9 +497,9 @@ function renderCharts(recs){
     type: 'bar',
     data: {
       labels: declEntries.length ? declEntries.map(([k])=>k) : ['(nenhum)'],
-      datasets: [{ data: declEntries.length ? declEntries.map(([,v])=>v) : [0], backgroundColor: '#E88126', borderRadius: 4 }],
+      datasets: [{ data: declEntries.length ? declEntries.map(([,v])=>v) : [0], backgroundColor: maybeDim(declEntries.map(([k])=>k), declEntries.map(()=>'#E88126'), 'motivoDeclinio'), borderRadius: 4 }],
     },
-    options: chartOptsBarH(),
+    options: { ...chartOptsBarH(), ...chartClickOpts('motivoDeclinio') },
   });
 
   // Soma do valor estimado por categoria — TREEMAP (SVG custom)

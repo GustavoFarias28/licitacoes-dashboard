@@ -45,14 +45,14 @@ export const STATUS_COLORS: Record<string, string> = {
   'Vamos Participar': '#0E2447',
   'Não Participamos': '#C4C7CD',
   'Perdemos': '#71757B',
-  'Ganhamos': '#0E2447',
+  'Ganhamos': '#2E9E5B',
   'Aguardando Republicação': '#71757B',
   'Participamos': '#5278B5',
 };
 
 export const MOTIVOS_DECLINIO = [
   'Atestados',
-  'Não declarado',
+  'Não trabalhado',
   'Falta de Parceiros',
   'Sem diferencial tecnológico',
   'Direcionamento de Fabricante',
