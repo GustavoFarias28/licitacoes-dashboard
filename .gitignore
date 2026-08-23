@@ -24,6 +24,10 @@ yarn-error.log*
 # vercel
 .vercel
 
+# Configurações locais do Claude Code
+.claude/settings.local.json
+.claude/scheduled_tasks.lock
+
 # typescript
 *.tsbuildinfo
 
